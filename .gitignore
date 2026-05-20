@@ -1,0 +1,32 @@
+# Python 字节码
+__pycache__/
+*.pyc
+*.pyo
+
+# 虚拟环境
+venv/
+.venv/
+
+# 构建产物
+build/
+dist/
+
+# 子项目构建
+xiux/build/
+xiux/dist/
+xiux/*.exe
+xiux/*.spec
+
+# 数据库（含用户自定义方案数据）
+*.db
+
+# 工具缓存
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# 编辑器/IDE 配置
+.claude/
+.vscode/
+.idea/

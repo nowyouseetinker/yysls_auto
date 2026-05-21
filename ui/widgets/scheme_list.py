@@ -1,84 +1,187 @@
 from __future__ import annotations
 
-import tkinter as tk
-from tkinter import ttk
+import customtkinter as ctk
 from typing import Any
 
 from models.scheme import Scheme
+from ui.theme import (
+    ACCENT_BLUE,
+    ACCENT_BLUE_HOVER,
+    BG_CARD,
+    BG_HOVER,
+    BG_SELECTED,
+    BORDER,
+    FONT_FAMILY,
+    TEXT_PRIMARY,
+)
 
 
-class SchemeListWidget(tk.Frame):
-    """方案列表控件。
+class _SchemeItem(ctk.CTkFrame):
+    """Compact list item — fixed height 36px, zero excess padding."""
 
-    显示所有方案（区分预设/自定义），支持单选，选中时触发
-    <<SchemeSelected>> 虚拟事件，供父窗口监听。
+    def __init__(
+        self,
+        parent: ctk.CTkScrollableFrame,
+        scheme: Scheme,
+        index: int,
+        on_click: Any,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(parent, height=36, **kwargs)
+        self.pack_propagate(False)
+
+        self._scheme = scheme
+        self._index = index
+        self._on_click = on_click
+        self._selected = False
+
+        # Left indicator bar (visible when selected)
+        self._indicator = ctk.CTkFrame(
+            self, width=3, corner_radius=0, fg_color="transparent"
+        )
+        self._indicator.pack(side=ctk.LEFT, fill=ctk.Y)
+
+        # Name label
+        self._name_label = ctk.CTkLabel(
+            self,
+            text=scheme.name,
+            font=ctk.CTkFont(family=FONT_FAMILY, size=13),
+            text_color=TEXT_PRIMARY,
+            anchor="w",
+        )
+        self._name_label.pack(side=ctk.LEFT, fill=ctk.BOTH, expand=True, padx=(6, 4))
+
+        for w in (self, self._name_label):
+            w.bind("<Button-1>", lambda e: self._on_click(self))
+            w.bind("<Enter>", lambda e: self._on_enter())
+            w.bind("<Leave>", lambda e: self._on_leave())
+
+    def _on_enter(self) -> None:
+        if not self._selected:
+            self.configure(fg_color=BG_HOVER)
+
+    def _on_leave(self) -> None:
+        if not self._selected:
+            self.configure(fg_color="transparent")
+
+    def set_selected(self, selected: bool) -> None:
+        self._selected = selected
+        if selected:
+            self.configure(fg_color=BG_SELECTED)
+            self._indicator.configure(fg_color=ACCENT_BLUE)
+        else:
+            self.configure(fg_color="transparent")
+            self._indicator.configure(fg_color="transparent")
+
+    @property
+    def scheme(self) -> Scheme:
+        return self._scheme
+
+    @property
+    def index(self) -> int:
+        return self._index
+
+
+class SchemeListWidget(ctk.CTkScrollableFrame):
+    """Scheme list with **fully hidden scrollbar** when content fits.
+
+    Strategy (CTkScrollableFrame deep hack):
+      1. Set ``scrollbar_fg_color`` = BG_CARD so the track slot is invisible.
+      2. Set ``scrollbar_button_color`` = BG_CARD initially (invisible).
+      3. After ``refresh()``, force ``_canvas.update_idletasks()`` then
+         measure content vs. visible height.
+      4. If content fits → ``pack_forget()`` the scrollbar (removes it from
+         layout entirely); the canvas expands to fill the gap.
+      5. If content overflows → ``pack()`` it back, tint button to ACCENT_BLUE.
+      6. Schedule a second check at +200ms to catch deferred geometry.
     """
 
-    def __init__(self, parent: tk.Widget, **kwargs: Any) -> None:
-        super().__init__(parent, **kwargs)
+    def __init__(self, parent: ctk.CTkBaseClass, **kwargs: Any) -> None:
+        super().__init__(
+            parent,
+            fg_color=BG_CARD,
+            corner_radius=8,
+            border_width=1,
+            border_color=BORDER,
+            # ── scrollbar track invisible (matches BG_CARD) ──────
+            scrollbar_fg_color=BG_CARD,
+            scrollbar_button_color=BG_CARD,
+            scrollbar_button_hover_color=ACCENT_BLUE,
+            **kwargs,
+        )
+
         self._scheme_map: dict[int, Scheme] = {}
-        self._build_ui()
+        self._items: list[_SchemeItem] = []
+        self._selected_item: _SchemeItem | None = None
 
-    # ── 界面构建 ────────────────────────────────────────────────
-
-    def _build_ui(self) -> None:
-        """创建标题标签、Listbox 和滚动条。"""
-        title = ttk.Label(self, text="方案列表")
-        title.pack(fill=tk.X, padx=2, pady=(2, 0))
-
-        list_frame = ttk.Frame(self)
-        list_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-
-        self._listbox = tk.Listbox(
-            list_frame, selectmode="browse", exportselection=False
-        )
-        self._listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        scrollbar = ttk.Scrollbar(
-            list_frame, orient=tk.VERTICAL, command=self._listbox.yview
-        )
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self._listbox.configure(yscrollcommand=scrollbar.set)
-
-        self._listbox.bind("<<ListboxSelect>>", self._on_select)
-
-    # ── 数据填充 ────────────────────────────────────────────────
+        self.after(100, self._adjust_scrollbar)
 
     def refresh(self, schemes: list[Scheme]) -> None:
-        """用方案列表填充 Listbox。
-
-        清空现有条目后按顺序插入，每项显示 "[预设] Name"
-        或 "[自定义] Name"，并建立索引到 Scheme 的映射。
-
-        Args:
-            schemes: 要显示的 Scheme 对象列表。
-        """
-        self._listbox.delete(0, tk.END)
+        for item in self._items:
+            item.destroy()
+        self._items.clear()
         self._scheme_map.clear()
+        self._selected_item = None
 
-        for i, scheme in enumerate(schemes):
-            prefix = "[预设]" if scheme.is_preset else "[自定义]"
-            label = f"{prefix} {scheme.name}"
-            self._listbox.insert(tk.END, label)
-            self._scheme_map[i] = scheme
+        for idx, scheme in enumerate(schemes):
+            item = _SchemeItem(
+                self,
+                scheme=scheme,
+                index=idx,
+                on_click=self._on_item_click,
+                fg_color="transparent",
+                corner_radius=4,
+            )
+            item.pack(fill=ctk.X, padx=0, pady=0)
+            self._items.append(item)
+            self._scheme_map[idx] = scheme
 
-    # ── 查询 ────────────────────────────────────────────────────
+        # Force geometry then check — schedule twice for safety
+        self.update_idletasks()
+        self._adjust_scrollbar()
+        self.after(200, self._adjust_scrollbar)
+
+    def _adjust_scrollbar(self) -> None:
+        """Toggle scrollbar visibility by swapping button color.
+
+        ``pack_forget()`` / ``pack()`` is unreliable with CTkScrollbar,
+        so we instead set the button (thumb) color to match the track
+        when content fits (= invisible), and to ACCENT_BLUE when content
+        overflows (= visible).  The track never shows because
+        ``scrollbar_fg_color`` is already BG_CARD.
+        """
+        try:
+            self.update_idletasks()
+            content_h = len(self._items) * 37  # 36px item + 1px gap
+            visible_h = self._parent_canvas.winfo_height()
+            if visible_h < 10:
+                return
+
+            if content_h <= visible_h + 4:
+                # ── Content fits → invisible thumb ───────────────
+                self._scrollbar.configure(
+                    fg_color=BG_CARD,
+                    button_color=BG_CARD,
+                    hover_color=BG_CARD,
+                )
+            else:
+                # ── Content overflows → visible thumb ────────────
+                self._scrollbar.configure(
+                    fg_color=BG_CARD,
+                    button_color=ACCENT_BLUE,
+                    hover_color=ACCENT_BLUE_HOVER,
+                )
+        except Exception:
+            pass
 
     def get_selected(self) -> Scheme | None:
-        """返回当前选中的 Scheme，没有选中时返回 None。"""
-        selected = self._listbox.curselection()  # type: ignore[no-untyped-call]
-        if not selected:
-            return None
-        return self._scheme_map.get(selected[0])
+        if self._selected_item is not None:
+            return self._selected_item.scheme
+        return None
 
-    # ── 事件处理 ────────────────────────────────────────────────
-
-    def _on_select(self, event: object) -> None:
-        """Listbox 选择变化时发出 <<SchemeSelected>> 虚拟事件。
-
-        父窗口可绑定 <<SchemeSelected>> 来响应方案切换。
-
-        Args:
-            event: Tkinter 的 <<ListboxSelect>> 事件对象。
-        """
+    def _on_item_click(self, item: _SchemeItem) -> None:
+        if self._selected_item is not None:
+            self._selected_item.set_selected(False)
+        item.set_selected(True)
+        self._selected_item = item
         self.event_generate("<<SchemeSelected>>", when="now")

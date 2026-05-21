@@ -13,7 +13,7 @@
 | 层 | 技术 | 说明 |
 |----|------|------|
 | 语言 | Python 3.11+ | 用户指定 |
-| GUI | Tkinter | Python 标准库自带，无需额外安装 |
+| GUI | CustomTkinter 5.2+ | 现代化扁平 UI，替代标准 Tkinter |
 | 数据库 | SQLite + sqlite3 | Python 标准库自带 |
 | 输入模拟 | pydirectinput | 通过 DirectInput API 发送输入，兼容全屏 3D 游戏 |
 | 全局热键 | keyboard | Windows 底层键盘钩子 |

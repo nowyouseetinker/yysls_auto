@@ -37,7 +37,7 @@
 | 类别 | 技术 | 说明 |
 |------|------|------|
 | 语言 | Python 3.11+ | 使用 `from __future__ import annotations` |
-| GUI | Tkinter | Python 标准库 |
+| GUI | **CustomTkinter 5.2+** | 现代化扁平 UI，替代标准 Tkinter |
 | 数据库 | SQLite (sqlite3) | Python 标准库 |
 | 输入模拟 | pydirectinput | 外部依赖 |
 | 全局热键 | keyboard | 外部依赖 |
@@ -112,6 +112,10 @@ yysls_auto/
 ├── app.py                    # 依赖组装工厂
 ├── main.py                   # 程序入口
 ├── build.spec                # PyInstaller 配置
+├── ui/theme.py               # 全局主题配置（颜色、字体、按钮预设）
+├── app.py                    # 依赖组装工厂
+├── main.py                   # 程序入口
+├── build.spec                # PyInstaller 配置
 ├── pyproject.toml            # 项目配置（ruff, mypy, black, isort）
 └── doc/                      # 文档目录
 ```
@@ -137,6 +141,7 @@ yysls_auto/
 - **同步**: `threading.Event`（停止信号）、`threading.Lock`（日志队列保护）、Tkinter `after()` 定时刷新
 - **预设保护**: `is_preset=True` 的方案禁止修改/删除
 - **依赖注入**: `app.py` 中创建所有实例并注入
+- **CustomTkinter UI**: 使用 CustomTkinter 替代标准 Tkinter，全局扁平化主题通过 `ui/theme.py` 配置（颜色常量、懒加载字体、按钮预设）。所有 `CTkFont` 在根窗口创建后按需初始化以避免导入时 `RuntimeError`。
 - **方案导出/导入（紧凑格式）**: `Scheme.to_export_string()` 使用短键名 + 省略默认值 + base64，6 步方案仅 ~280B（原始 1.4KB）；`Scheme.from_export_string()` 解码并用新 UUID 创建方案，`order` 从数组索引重建
 
 ---
@@ -381,6 +386,13 @@ known_first_party = ["models", "infra", "services", "ui"]
 7. **日志回调线程安全**: LogService 的回调可能来自非主线程，UI widget 中必须用 `after(0, ...)` 调度到主线程更新。
 
 8. **方案导出/导入（紧凑格式）**: `models/scheme.py` 中的 `to_export_string()` 将方案编码为紧凑 JSON（短键名如 `n`/`a`/`t`/`k`/`m`，省略 `order`/默认时长/默认热键），再 base64 编码。6 步方案从 1.4KB 压缩至 ~280B。导入时 `from_export_string()` 通过 `_action_from_compact()` 解码，调用 `Scheme.create()` 生成全新 UUID。工具栏「导出方案」「导入方案」按钮在 `ui/main_window.py` 中实现。
+
+9. **CustomTkinter 注意事项**:
+   - `CTkFont` 不能在根窗口创建前实例化。`ui/theme.py` 使用懒加载字典 + 函数工厂，字体在首次调用 `label_font()` / `small_font()` 等时按需创建。
+   - `CTkTextbox.tag_config()` **不支持 `font` 参数**（因缩放兼容性），只能设置 `foreground` 颜色。如需不同字体尺寸，通过 `CTkTextbox` 构造时的 `font=` 统一设定。
+   - `CTkScrollableFrame` 的滚动条通过 `scrollbar_fg_color` / `scrollbar_button_color` 控制。`pack_forget()` 不可靠，改用按钮颜色切换（内容适合时设为与背景同色以隐藏）。
+   - 右侧 PanedWindow 使用标准 `tk.PanedWindow`（CTk 无对应组件），需通过 `.sash_place()` 设置初始比例。
+   - 所有按钮通过 `ui/theme.py` 中的 `BTN_DEFAULT` / `BTN_PRIMARY` / `BTN_SUCCESS` / `BTN_DANGER` 预设字典统一配置，字体在调用处显式设置。'
 
 ---
 
